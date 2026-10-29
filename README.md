@@ -1,6 +1,10 @@
 <a name="readme-top"></a>
 
 <div align="center">
+  English | <a href="./README.zh-CN.md">简体中文</a>
+</div>
+
+<div align="center">
   <img src="https://assets.openhands.dev/logo-whitebackground.png" alt="OpenHands logo" width="340">
   <h1 align="center" style="border-bottom: none">Agent Canvas</h1>
   <p align="center">

@@ -4,7 +4,9 @@ export const DEFAULT_SETTINGS: Settings = {
   llm_model: "openai/gpt-5.6-sol",
   llm_base_url: "",
   agent: "CodeActAgent",
-  language: "en",
+  // Default to Simplified Chinese; users can still switch languages in
+  // Settings > Language (see AvailableLanguages in #/i18n).
+  language: "zh-CN",
   llm_api_key: null,
   llm_api_key_set: false,
   search_api_key_set: false,
