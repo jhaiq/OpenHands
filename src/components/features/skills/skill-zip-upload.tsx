@@ -69,6 +69,8 @@ const BLOCKER_CODE_KEYS: Record<string, I18nKey> = {
   "missing-frontmatter": I18nKey.SETTINGS$SKILLS_ZIP_BLOCK_FRONTMATTER,
   "unterminated-frontmatter": I18nKey.SETTINGS$SKILLS_ZIP_BLOCK_FRONTMATTER,
   "invalid-frontmatter": I18nKey.SETTINGS$SKILLS_ZIP_BLOCK_FRONTMATTER,
+  "frontmatter-syntax": I18nKey.SETTINGS$SKILLS_ZIP_BLOCK_FRONTMATTER_SYNTAX,
+  "triggers-type": I18nKey.SETTINGS$SKILLS_ZIP_BLOCK_TRIGGERS_TYPE,
   "missing-name": I18nKey.SETTINGS$SKILLS_ZIP_BLOCK_NAME,
   "missing-description": I18nKey.SETTINGS$SKILLS_ZIP_BLOCK_NAME,
   "invalid-name": I18nKey.SETTINGS$SKILLS_ZIP_BLOCK_NAME,
@@ -154,6 +156,7 @@ export function SkillZipUpload({ onClose }: SkillZipUploadProps) {
       ...validation.blockers.map((blocker) => ({
         code: blocker.code,
         entry: "SKILL.md",
+        ...(blocker.params ? { params: blocker.params } : {}),
       })),
       ...secrets.findings.map((finding) => ({
         code: `secret:${finding.rule}`,

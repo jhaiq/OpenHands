@@ -155,4 +155,57 @@ body
     expect(result.ok).toBe(false);
     expect(result.ok ? null : result.code).toBe("invalid-line");
   });
+
+  it("accepts a YAML sequence value such as triggers", () => {
+    const result = parseSkillFrontmatter(`---
+name: list-skill
+description: Has keyword triggers.
+triggers:
+  - develop
+  - troubleshoot
+---
+`);
+
+    expect(result).toMatchObject({
+      ok: true,
+      frontmatter: { name: "list-skill", description: "Has keyword triggers." },
+    });
+  });
+
+  it("rejects an unquoted colon inside a plain scalar", () => {
+    const result = parseSkillFrontmatter(`---
+name: colon-skill
+description: Probes first (DRY/BUILD): then acts.
+---
+`);
+
+    expect(result.ok).toBe(false);
+    expect(result.ok ? null : result.code).toBe("unquoted-colon");
+    expect(result.ok ? null : result.line).toBe(3);
+  });
+
+  it("allows colons inside quoted and block scalars", () => {
+    const quoted = parseSkillFrontmatter(
+      '---\nname: q\ndescription: "Probes first: then acts."\n---\n',
+    );
+    expect(quoted.ok).toBe(true);
+
+    const block = parseSkillFrontmatter(
+      "---\nname: b\ndescription: >\n  Probes first: then acts.\n---\n",
+    );
+    expect(block.ok).toBe(true);
+  });
+
+  it("rejects a scalar triggers value", () => {
+    const result = parseSkillFrontmatter(`---
+name: scalar-triggers
+description: d
+triggers: develop / troubleshoot
+---
+`);
+
+    expect(result.ok).toBe(false);
+    expect(result.ok ? null : result.code).toBe("triggers-not-list");
+    expect(result.ok ? null : result.line).toBe(4);
+  });
 });

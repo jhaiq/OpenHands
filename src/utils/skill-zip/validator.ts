@@ -9,6 +9,7 @@
 
 import type { UnpackedFile } from "./unpack";
 import { isScriptPath } from "./unpack";
+import type { FrontmatterResult } from "./frontmatter";
 import { parseSkillFrontmatter } from "./frontmatter";
 
 export type ValidatorBlockerCode =
@@ -16,6 +17,8 @@ export type ValidatorBlockerCode =
   | "missing-frontmatter"
   | "unterminated-frontmatter"
   | "invalid-frontmatter"
+  | "frontmatter-syntax"
+  | "triggers-type"
   | "missing-name"
   | "missing-description"
   | "invalid-name"
@@ -24,6 +27,8 @@ export type ValidatorBlockerCode =
 export interface SkillPackageIssue {
   code: ValidatorBlockerCode;
   message: string;
+  /** i18n interpolation values surfaced in the UI (e.g. the offending line). */
+  params?: Record<string, string | number>;
 }
 
 export interface SkillPackageInfo {
@@ -81,10 +86,8 @@ export function validateSkillPackage(
   const markdown = new TextDecoder().decode(skillMd.bytes);
   const parsed = parseSkillFrontmatter(markdown);
   if (!parsed.ok) {
-    const code: ValidatorBlockerCode =
-      parsed.code === "invalid-line" ? "invalid-frontmatter" : parsed.code;
     return {
-      blockers: [{ code, message: parsed.message }],
+      blockers: [toFrontmatterIssue(parsed)],
       info,
     };
   }
@@ -106,4 +109,33 @@ export function validateSkillPackage(
   }
 
   return { blockers, info };
+}
+
+type FrontmatterFailure = Extract<FrontmatterResult, { ok: false }>;
+
+/**
+ * Maps a frontmatter parse failure onto a user-facing blocker. The two
+ * YAML-level codes carry the offending line so the report can name it instead
+ * of showing a bare "frontmatter is invalid".
+ */
+function toFrontmatterIssue(parsed: FrontmatterFailure): SkillPackageIssue {
+  if (parsed.code === "unquoted-colon") {
+    return {
+      code: "frontmatter-syntax",
+      message: parsed.message,
+      // These codes are only produced from a line-scoped parse, so `line` is
+      // always set; the fallback keeps the type honest.
+      params: { line: parsed.line ?? 0 },
+    };
+  }
+  if (parsed.code === "triggers-not-list") {
+    return {
+      code: "triggers-type",
+      message: parsed.message,
+      params: { line: parsed.line ?? 0 },
+    };
+  }
+  const code: ValidatorBlockerCode =
+    parsed.code === "invalid-line" ? "invalid-frontmatter" : parsed.code;
+  return { code, message: parsed.message };
 }

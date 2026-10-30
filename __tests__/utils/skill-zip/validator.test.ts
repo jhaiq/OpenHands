@@ -51,6 +51,26 @@ describe("validateSkillPackage", () => {
     expect(blockerCodes(result)).toContain("missing-frontmatter");
   });
 
+  it("blocks YAML-level frontmatter problems and reports the line", () => {
+    const unquotedColon = validateSkillPackage([
+      file(
+        "SKILL.md",
+        "---\nname: demo-skill\ndescription: Probes (DRY): then acts.\n---\n",
+      ),
+    ]);
+    expect(blockerCodes(unquotedColon)).toContain("frontmatter-syntax");
+    expect(unquotedColon.blockers[0].params).toEqual({ line: 3 });
+
+    const scalarTriggers = validateSkillPackage([
+      file(
+        "SKILL.md",
+        "---\nname: demo-skill\ndescription: d\ntriggers: a / b\n---\n",
+      ),
+    ]);
+    expect(blockerCodes(scalarTriggers)).toContain("triggers-type");
+    expect(scalarTriggers.blockers[0].params).toEqual({ line: 4 });
+  });
+
   it("blocks when frontmatter lacks name or description", () => {
     const noName = validateSkillPackage([
       file("SKILL.md", "---\ndescription: only description\n---\nbody\n"),
