@@ -12,6 +12,8 @@ import { cn } from "#/utils/utils";
 import { modalTitleLgClassName } from "#/utils/modal-classes";
 import CheckmarkIcon from "#/icons/checkmark.svg?react";
 import CopyIcon from "#/icons/copy.svg?react";
+import SkillsService from "#/api/skills-service";
+import { SkillZipUpload } from "#/components/features/skills/skill-zip-upload";
 
 interface AddSkillModalProps {
   onClose: () => void;
@@ -113,6 +115,19 @@ function AddSkillTransParagraph({
 
 export function AddSkillModal({ onClose }: AddSkillModalProps) {
   const { t } = useTranslation("openhands");
+  // Only servers with the installed-skills endpoints on a local backend can
+  // install an uploaded ZIP; the section stays hidden otherwise.
+  const [zipUploadSupported, setZipUploadSupported] = React.useState(false);
+
+  React.useEffect(() => {
+    let cancelled = false;
+    SkillsService.hasInstallSupport().then((supported) => {
+      if (!cancelled) setZipUploadSupported(supported);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   return (
     <ModalBackdrop
@@ -183,6 +198,8 @@ export function AddSkillModal({ onClose }: AddSkillModalProps) {
           <AddSkillTransParagraph
             i18nKey={I18nKey.SETTINGS$SKILLS_ADD_MODAL_PRIVATE_REPOS}
           />
+
+          {zipUploadSupported && <SkillZipUpload onClose={onClose} />}
 
           <a
             href={ADD_SKILL_DOCS_URL}

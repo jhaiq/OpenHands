@@ -309,9 +309,10 @@ class SkillsService {
 
   /**
    * Whether this agent-server supports installing skills (the
-   * `/api/skills/installed` endpoints). Probed once per backend and cached;
-   * 404/405 (old servers) and transport errors report `false` so the upload
-   * UI can hide instead of failing mid-flow.
+   * `/api/skills/installed` endpoints). Never runs on Cloud. Probed once per
+   * backend and cached; only an explicit 404/405 (old servers) reports `false`
+   * so the upload UI hides instead of failing mid-flow, while transport errors
+   * keep the UI available and let the real install attempt surface the problem.
    */
   static async hasInstallSupport(): Promise<boolean> {
     if (isCloudBackend()) return false;
