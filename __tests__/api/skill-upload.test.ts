@@ -61,19 +61,14 @@ describe("uploadSkillPackage", () => {
     expect(result.fileCount).toBe(2);
     expect(mockUploadFile).toHaveBeenCalledTimes(2);
 
-    const calls = mockUploadFile.mock.calls.map(
-      ([, destination, fileName]) => ({
-        destination,
-        fileName,
-      }),
+    // `/api/file/upload?path=` receives the absolute file path.
+    const destinations = mockUploadFile.mock.calls.map(
+      ([, destination]) => destination,
     );
-    expect(calls).toEqual(
+    expect(destinations).toEqual(
       expect.arrayContaining([
-        { destination: result.skillDir, fileName: "SKILL.md" },
-        {
-          destination: `${result.skillDir}/scripts`,
-          fileName: "run.sh",
-        },
+        `${result.skillDir}/SKILL.md`,
+        `${result.skillDir}/scripts/run.sh`,
       ]),
     );
   });
@@ -106,12 +101,12 @@ describe("uploadSkillPackage", () => {
   });
 
   it("aborts on the first failure and reports the failing entry", async () => {
-    mockUploadFile.mockImplementation(
-      async (_content, destination, fileName) => {
-        if (fileName === "run.sh") throw { status: 507, detail: "disk full" };
-        return { success: true };
-      },
-    );
+    mockUploadFile.mockImplementation(async (_content, destination) => {
+      if (destination.endsWith("/run.sh")) {
+        throw { status: 507, detail: "disk full" };
+      }
+      return { success: true };
+    });
 
     const error = await uploadSkillPackage(SKILL_ENTRIES, "demo-skill").catch(
       (caught: unknown) => caught,

@@ -160,19 +160,15 @@ async function stageEntries(
   let failure: unknown;
 
   const uploadOne = async (entry: UnpackedFile): Promise<void> => {
-    const segments = entry.path.split("/");
-    const fileName = segments[segments.length - 1];
-    const destinationPath =
-      segments.length > 1
-        ? `${skillDir}/${segments.slice(0, -1).join("/")}`
-        : skillDir;
+    // `/api/file/upload?path=` takes the absolute FILE path (the server
+    // creates missing parent directories itself), not a target directory.
+    const destinationPath = `${skillDir}/${entry.path}`;
     try {
       // `new Uint8Array(view)` copies into a plain ArrayBuffer, which is a
       // valid BlobPart regardless of the source buffer's type.
       await client.uploadFile(
         new Blob([new Uint8Array(entry.bytes)]),
         destinationPath,
-        fileName,
       );
     } catch (error) {
       const status = getStatus(error);
