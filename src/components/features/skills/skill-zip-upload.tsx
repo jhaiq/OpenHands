@@ -146,7 +146,7 @@ export function SkillZipUpload({ onClose }: SkillZipUploadProps) {
     phase: Extract<InstallPhase, { state: "report" }>,
   ) => {
     const { zip, validation, secrets } = phase;
-    const blockers: { code: string; entry?: string }[] = [
+    const blockers: ZipIssue[] = [
       ...zip.blockers.map((blocker) => ({
         code: blocker.code,
         entry: blocker.entry,
@@ -158,6 +158,7 @@ export function SkillZipUpload({ onClose }: SkillZipUploadProps) {
       ...secrets.findings.map((finding) => ({
         code: `secret:${finding.rule}`,
         entry: `${finding.file}:${finding.line}`,
+        params: { file: finding.file, line: finding.line, rule: finding.rule },
       })),
     ];
     return blockers;
@@ -167,7 +168,7 @@ export function SkillZipUpload({ onClose }: SkillZipUploadProps) {
     phase: Extract<InstallPhase, { state: "report" }>,
   ) => {
     const { zip, validation, secrets } = phase;
-    const warnings: { code: string; entry?: string }[] = [
+    const warnings: ZipIssue[] = [
       ...zip.warnings.map((warning) => ({
         code: warning.code,
         entry: warning.entry,
@@ -424,8 +425,8 @@ export function SkillZipUpload({ onClose }: SkillZipUploadProps) {
 
 interface SkillZipReportProps {
   phase: Extract<InstallPhase, { state: "report" }>;
-  blockers: { code: string; entry?: string }[];
-  warnings: { code: string; entry?: string }[];
+  blockers: ZipIssue[];
+  warnings: ZipIssue[];
   warningsAcknowledged: boolean;
   onAcknowledgeChange: (acknowledged: boolean) => void;
   onReselect: () => void;
@@ -433,13 +434,20 @@ interface SkillZipReportProps {
   onInstall: () => void;
 }
 
-function blockerMessageKey(code: string): I18nKey {
-  return BLOCKER_CODE_KEYS[code] ?? I18nKey.SETTINGS$SKILLS_ZIP_BLOCK_GENERIC;
+interface ZipIssue {
+  code: string;
+  entry?: string;
+  /** i18n interpolation values (e.g. file/line/rule for secret findings). */
+  params?: Record<string, string | number>;
 }
 
-function secretParams(code: string): { rule: string } {
-  // Codes look like "secret:<rule>"; the rule is a program identifier.
-  return { rule: code.slice("secret:".length) };
+function blockerMessageKey(code: string): I18nKey {
+  // Secret codes carry the rule name ("secret:<rule>"); the entry prefix
+  // ("notes/config.txt:1") is rendered separately, never the secret itself.
+  if (code.startsWith("secret:")) {
+    return I18nKey.SETTINGS$SKILLS_ZIP_BLOCK_SECRET;
+  }
+  return BLOCKER_CODE_KEYS[code] ?? I18nKey.SETTINGS$SKILLS_ZIP_BLOCK_GENERIC;
 }
 
 function SkillZipReport({
@@ -476,12 +484,10 @@ function SkillZipReport({
                 {blocker.entry && (
                   <span className="font-mono">{blocker.entry}: </span>
                 )}
-                {blocker.code.startsWith("secret:")
-                  ? t(
-                      I18nKey.SETTINGS$SKILLS_ZIP_BLOCK_SECRET,
-                      secretParams(blocker.code),
-                    )
-                  : t(blockerMessageKey(blocker.code))}
+                {t(
+                  blockerMessageKey(blocker.code),
+                  "params" in blocker ? blocker.params : undefined,
+                )}
               </li>
             ))}
           </ul>
