@@ -138,13 +138,33 @@ body
     expect(result.ok ? null : result.code).toBe("missing-name");
   });
 
-  it("rejects structured YAML values instead of silently mis-parsing them", () => {
+  it("rejects a structured name instead of silently mis-parsing it", () => {
     const result = parseSkillFrontmatter(
       "---\nname: [a, b]\ndescription: {x: 1}\n---\n",
     );
 
     expect(result.ok).toBe(false);
-    expect(result.ok ? null : result.code).toBe("invalid-line");
+    expect(result.ok ? null : result.code).toBe("missing-name");
+  });
+
+  it("accepts inline sequences and inline mappings", () => {
+    const inlineList = parseSkillFrontmatter(
+      '---\nname: x\ndescription: d\ntriggers: [develop, "trouble shoot"]\n---\n',
+    );
+    expect(inlineList.ok).toBe(true);
+
+    const inlineMap = parseSkillFrontmatter(
+      "---\nname: x\ndescription: d\nmetadata: {author: me, tier: 2}\n---\n",
+    );
+    expect(inlineMap.ok).toBe(true);
+  });
+
+  it("rejects an inline mapping or scalar for triggers", () => {
+    const mapping = parseSkillFrontmatter(
+      "---\nname: x\ndescription: d\ntriggers: {a: b}\n---\n",
+    );
+    expect(mapping.ok).toBe(false);
+    expect(mapping.ok ? null : mapping.code).toBe("triggers-not-list");
   });
 
   it("rejects stray indented lines", () => {

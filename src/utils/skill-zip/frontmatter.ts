@@ -15,9 +15,10 @@
  *   ---
  *
  * Supported value forms: plain scalars, single/double quoted scalars, `>` / `|`
- * block scalars (with an optional chomping indicator), and `- item` sequences.
- * Unknown keys are ignored but their block scalars and sequences are consumed
- * correctly.
+ * block scalars (with an optional chomping indicator), block sequences
+ * (`- item`) and flow collections (`[a, b]`, `{k: v}`). Flow mappings are
+ * accepted but their content is not consumed. Unknown keys are ignored but
+ * their block scalars, sequences and flow collections are consumed correctly.
  *
  * The rules below mirror what the Agent Server's YAML loader accepts, so a
  * package that passes here does not get rejected later at install time:
@@ -107,9 +108,13 @@ export function parseSkillFrontmatter(markdown: string): FrontmatterResult {
     );
   }
 
-  // The server reads `triggers` as a keyword list; a plain string makes the
-  // skill unloadable, so reject it here where the message can be specific.
-  if (fields.scalars.has("triggers") && !fields.lists.has("triggers")) {
+  // The server reads `triggers` as a keyword list; a plain string or an inline
+  // mapping makes the skill unloadable, so reject them where the message can be
+  // specific.
+  if (
+    !fields.lists.has("triggers") &&
+    (fields.scalars.has("triggers") || fields.inlineMaps.has("triggers"))
+  ) {
     return fail(
       "triggers-not-list",
       'The "triggers" field must be a list of keywords, not a single string',
@@ -132,6 +137,8 @@ type ParsedFields =
       scalars: Map<string, string>;
       blocks: Map<string, { style: ">" | "|"; text: string }>;
       lists: Map<string, string[]>;
+      /** Keys whose value was an inline mapping (`{...}`), which we ignore. */
+      inlineMaps: Set<string>;
       /** Key -> 1-based SKILL.md line number, for precise error messages. */
       lines: Map<string, number>;
     }
@@ -141,6 +148,7 @@ function parseFields(blockLines: string[]): ParsedFields {
   const scalars = new Map<string, string>();
   const blocks = new Map<string, { style: ">" | "|"; text: string }>();
   const lists = new Map<string, string[]>();
+  const inlineMaps = new Set<string>();
   const lines = new Map<string, number>();
 
   /** Key of the `key:` line a following `- item` block belongs to. */
@@ -215,6 +223,20 @@ function parseFields(blockLines: string[]): ParsedFields {
       raw.length >= 2 &&
       (raw[0] === '"' || raw[0] === "'") &&
       raw.endsWith(raw[0]);
+
+    // Flow-style collections come first: `triggers: [a, b]` and
+    // `metadata: {k: v}` are valid YAML that the server accepts, and their
+    // content may legitimately contain ": " or "," inside quotes.
+    if (!quoted && raw.startsWith("[") && raw.endsWith("]")) {
+      lists.set(key, splitInlineSequence(raw.slice(1, -1)));
+      continue;
+    }
+
+    if (!quoted && raw.startsWith("{") && raw.endsWith("}")) {
+      inlineMaps.add(key);
+      continue;
+    }
+
     const value = quoted ? unquote(raw) : raw;
 
     if (!quoted && /:(\s|$)/.test(raw)) {
@@ -227,13 +249,7 @@ function parseFields(blockLines: string[]): ParsedFields {
       );
     }
 
-    if (
-      !quoted &&
-      (value.startsWith("[") ||
-        value.startsWith("{") ||
-        value.startsWith("&") ||
-        value.startsWith("*"))
-    ) {
+    if (!quoted && (raw.startsWith("&") || raw.startsWith("*"))) {
       return fail(
         "invalid-line",
         `Frontmatter value for "${key}" uses unsupported YAML syntax; use a plain scalar`,
@@ -244,7 +260,47 @@ function parseFields(blockLines: string[]): ParsedFields {
     scalars.set(key, value);
   }
 
-  return { ok: true, scalars, blocks, lists, lines };
+  return { ok: true, scalars, blocks, lists, inlineMaps, lines };
+}
+
+/**
+ * Splits the body of a flow sequence (`a, "b, c", d`) on top-level commas,
+ * leaving commas inside quotes untouched.
+ */
+function splitInlineSequence(body: string): string[] {
+  const items: string[] = [];
+  let current = "";
+  let quote: string | null = null;
+
+  for (const char of body) {
+    if (quote !== null) {
+      if (char === quote) {
+        quote = null;
+      }
+      current += char;
+      continue;
+    }
+    if (char === '"' || char === "'") {
+      quote = char;
+      current += char;
+      continue;
+    }
+    if (char === ",") {
+      const item = unquote(current.trim());
+      if (item.length > 0) {
+        items.push(item);
+      }
+      current = "";
+      continue;
+    }
+    current += char;
+  }
+
+  const last = unquote(current.trim());
+  if (last.length > 0) {
+    items.push(last);
+  }
+  return items;
 }
 
 function unquote(value: string): string {
