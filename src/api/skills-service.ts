@@ -1,3 +1,4 @@
+import { isHttpError } from "@openhands/typescript-client";
 import {
   AgentServerClient,
   SkillsClient,
@@ -76,6 +77,89 @@ function toCatalogSkill(entry: unknown): SkillInfo {
 
 function hasStatus(error: unknown, status: number): boolean {
   return isRecord(error) && error.status === status;
+}
+
+export type SkillInstallErrorCode =
+  | "conflict"
+  | "invalid"
+  | "unreadable"
+  | "unsupported"
+  | "unknown";
+
+/**
+ * A failed skill install/uninstall, with the raw HTTP status mapped to a
+ * stable code the UI can branch on:
+ *
+ * - `conflict` (409): a skill with the same name is already installed; the
+ *   UI offers a force-overwrite.
+ * - `invalid` (422): the server rejected the package contents (bad SKILL.md
+ *   or frontmatter); `detail` carries the server's message.
+ * - `unreadable` (400): the server could not read the source directory.
+ * - `unsupported`: a cloud backend, or the agent-server predates the
+ *   installed-skills endpoints.
+ * - `unknown`: anything else.
+ */
+export class SkillInstallError extends Error {
+  readonly code: SkillInstallErrorCode;
+  readonly detail?: string;
+  readonly status?: number;
+
+  constructor(
+    code: SkillInstallErrorCode,
+    message: string,
+    options: { detail?: string; status?: number; cause?: unknown } = {},
+  ) {
+    super(message, { cause: options.cause });
+    this.name = "SkillInstallError";
+    this.code = code;
+    this.detail = options.detail;
+    this.status = options.status;
+  }
+}
+
+function getStatus(error: unknown): number | undefined {
+  if (isHttpError(error)) return error.status;
+  if (isRecord(error) && typeof error.status === "number") return error.status;
+  return undefined;
+}
+
+function getDetail(error: unknown): string | undefined {
+  if (isHttpError(error)) return error.detail;
+  if (
+    isRecord(error) &&
+    typeof error.detail === "string" &&
+    error.detail.trim()
+  ) {
+    return error.detail;
+  }
+  return undefined;
+}
+
+/** Minimal shape of a server-side installed skill, per the agent-server API. */
+export interface InstalledSkillSummary {
+  name: string;
+  version?: string | null;
+  enabled: boolean;
+}
+
+interface SkillsClientWithInstall {
+  installSkill(request: {
+    source: string;
+    force?: boolean;
+  }): Promise<Record<string, unknown>>;
+  listInstalledSkills(): Promise<{ skills?: InstalledSkillSummary[] }>;
+  uninstallSkill(skillName: string): Promise<{ message: string }>;
+  getSkills(request: Record<string, unknown>): Promise<{ skills?: unknown[] }>;
+}
+
+function getInstallClient(): SkillsClientWithInstall {
+  return new SkillsClient(
+    getAgentServerClientOptions(),
+  ) as unknown as SkillsClientWithInstall;
+}
+
+function isCloudBackend(): boolean {
+  return getActiveBackend().backend.kind === "cloud";
 }
 
 class SkillsService {
@@ -157,6 +241,124 @@ class SkillsService {
   static getConversationSkills(conversationId: string): Promise<SkillInfo[]> {
     return fetchCloudConversationSkills(conversationId);
   }
+
+  /**
+   * Installs a skill from a directory that already exists on the agent-server
+   * host (e.g. the ZIP-upload staging directory). The server enforces
+   * `SKILL.md` validity and `name == directory name`; 409/422/400 responses
+   * are mapped to {@link SkillInstallError} codes.
+   */
+  static async installSkillFromDirectory(
+    directory: string,
+    { force = false }: { force?: boolean } = {},
+  ): Promise<Record<string, unknown>> {
+    if (isCloudBackend()) {
+      throw new SkillInstallError(
+        "unsupported",
+        "Installing skills is only available on a local backend.",
+      );
+    }
+
+    try {
+      return await getInstallClient().installSkill({
+        source: directory,
+        force,
+      });
+    } catch (error) {
+      throw mapInstallError(error, "install");
+    }
+  }
+
+  /**
+   * Skills installed on the agent-server host
+   * (`~/.openhands/skills/installed/`). Returns an empty list on cloud
+   * backends, on servers without the installed-skills endpoints, or when the
+   * server is unreachable — callers that need the distinction should use
+   * {@link hasInstallSupport} instead.
+   */
+  static async listInstalledSkills(): Promise<InstalledSkillSummary[]> {
+    if (isCloudBackend()) return [];
+
+    try {
+      const response = await getInstallClient().listInstalledSkills();
+      return response.skills ?? [];
+    } catch {
+      return [];
+    }
+  }
+
+  /**
+   * Removes an installed skill. A 404 is treated as "already uninstalled"
+   * and resolves normally so retries and races are harmless.
+   */
+  static async uninstallSkill(name: string): Promise<void> {
+    if (isCloudBackend()) {
+      throw new SkillInstallError(
+        "unsupported",
+        "Uninstalling skills is only available on a local backend.",
+      );
+    }
+
+    try {
+      await getInstallClient().uninstallSkill(name);
+    } catch (error) {
+      if (getStatus(error) === 404) return;
+      throw mapInstallError(error, "uninstall");
+    }
+  }
+
+  /**
+   * Whether this agent-server supports installing skills (the
+   * `/api/skills/installed` endpoints). Probed once per backend and cached;
+   * 404/405 (old servers) and transport errors report `false` so the upload
+   * UI can hide instead of failing mid-flow.
+   */
+  static async hasInstallSupport(): Promise<boolean> {
+    if (isCloudBackend()) return false;
+
+    const { host } = getAgentServerClientOptions();
+    const cached = installSupportCache.get(host);
+    if (cached) return cached;
+
+    const probe = (async () => {
+      try {
+        await getInstallClient().listInstalledSkills();
+        return true;
+      } catch (error) {
+        const status = getStatus(error);
+        return status !== 404 && status !== 405;
+      }
+    })();
+
+    installSupportCache.set(host, probe);
+    return probe;
+  }
+}
+
+const installSupportCache = new Map<string, Promise<boolean>>();
+
+/** Test-only helper. */
+export function __resetInstallSupportCacheForTests(): void {
+  installSupportCache.clear();
+}
+
+function mapInstallError(error: unknown, action: string): SkillInstallError {
+  const status = getStatus(error);
+  const detail = getDetail(error);
+  const code: SkillInstallErrorCode =
+    status === 409
+      ? "conflict"
+      : status === 422
+        ? "invalid"
+        : status === 400
+          ? "unreadable"
+          : "unknown";
+  const message =
+    detail ??
+    (status !== undefined
+      ? `Skill ${action} failed with status ${status}`
+      : `Skill ${action} failed`);
+  return new SkillInstallError(code, message, { detail, status, cause: error });
 }
 
 export default SkillsService;
